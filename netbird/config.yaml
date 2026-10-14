@@ -17,8 +17,12 @@
 server:
   listenAddress: ":80"
   exposedAddress: "https://mesh.example.com:443"
-  stunPorts:
-    - 3478
+  # STUN must be reachable directly by the peers. An HTTP proxy/CDN (Cloudflare proxy,
+  # Cloudflare Tunnel) does not carry UDP, so do not advertise the proxied domain here if
+  # the deployment sits behind one. Setting `stuns` disables the built-in STUN server,
+  # which is why the compose file runs a standalone coturn container on 3478/udp.
+  stuns:
+    - uri: "stun:203.0.113.10:3478"   # server public IP, or a DNS-only hostname
   metricsPort: 9090
   healthcheckAddress: ":9000"
   logLevel: "info"
