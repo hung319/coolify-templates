@@ -97,5 +97,9 @@ Things learned while making these work:
 * `SERVICE_FQDN_*` magic variables can carry a path (`SERVICE_FQDN_APP=/api`), but each container
   of a service gets its own generated host, so they cannot put two containers of one service on the
   same domain — that still needs hand-written Traefik labels.
+* A domain behind the Cloudflare proxy cannot carry UDP (STUN) and cannot carry gRPC
+  trailers through a Tunnel public hostname. Either put the HTTP/gRPC traffic behind the
+  proxy (works, needs the zone gRPC toggle) and advertise STUN on a direct address, or keep
+  the whole hostname off Cloudflare.
 * Panels behind Cloudflare reject requests carrying the default `python-urllib` user agent
   (error 1010, `browser_signature_banned`); `deploy.py` sends its own user agent.
