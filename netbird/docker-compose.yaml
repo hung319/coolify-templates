@@ -1,0 +1,109 @@
+# documentation: https://docs.netbird.io/selfhosted/selfhosted-guide
+# slogan: Self-hosted WireGuard-based overlay network with SSO/MFA, embedded IdP, signal, relay and dashboard in one stack.
+# category: vpn
+# tags: vpn,wireguard,mesh-networks,zero-trust-network-access,open-source
+# logo: svgs/netbird.png
+# port: 80
+
+services:
+  netbird-server:
+    image: 'netbirdio/netbird-server:0.80.0'
+    entrypoint: ['/bin/sh', '-c']
+    # The all-in-one server must know its public URL (OIDC issuer, relay address,
+    # dashboard redirect URIs). Coolify knows it as COOLIFY_FQDN, so the config file is
+    # generated on startup instead of shipping a static one.
+    command:
+      - |
+        set -e
+        mkdir -p /var/lib/netbird
+        DOMAIN="$${COOLIFY_FQDN:-localhost}"
+        SECRET_FILE=/var/lib/netbird/auth-secret
+        if [ ! -f "$${SECRET_FILE}" ]; then head -c 32 /dev/urandom | base64 -w0 > "$${SECRET_FILE}"; fi
+        cat > /etc/netbird/config.yaml <<CONFIG
+        server:
+          listenAddress: ":80"
+          exposedAddress: "https://$${DOMAIN}:443"
+          stunPorts:
+            - 3478
+          metricsPort: 9090
+          healthcheckAddress: ":9000"
+          logLevel: "info"
+          logFile: "console"
+          tls:
+            enabled: false
+          authSecret: "$$(cat $${SECRET_FILE})"
+          dataDir: "/var/lib/netbird"
+        auth:
+          issuer: "https://$${DOMAIN}/oauth2"
+          signKeyRefreshEnabled: true
+          dashboardRedirectURIs:
+            - "https://$${DOMAIN}/nb-auth"
+            - "https://$${DOMAIN}/nb-silent-auth"
+          cliRedirectURIs:
+            - "http://localhost:53000/"
+        store:
+          engine: "sqlite"
+        CONFIG
+        exec /go/bin/netbird-server --config /etc/netbird/config.yaml
+    ports:
+      - '3478:3478/udp'
+    volumes:
+      - 'netbird-data:/var/lib/netbird'
+    healthcheck:
+      # the image ships neither curl nor wget, so probe with bash's /dev/tcp
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/80 && printf \"GET /api/instance HTTP/1.0\\r\\n\\r\\n\" >&3 && head -1 <&3 | grep -q 200'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    labels:
+      - traefik.enable=true
+      # management API, embedded IdP, relay and reverse proxy websocket
+      - 'traefik.http.routers.netbird-backend.rule=Host(`${SERVICE_FQDN_NETBIRD}`) && (PathPrefix(`/api`) || PathPrefix(`/oauth2`) || PathPrefix(`/relay`) || PathPrefix(`/ws-proxy/`))'
+      - 'traefik.http.routers.netbird-backend.entrypoints=http'
+      - 'traefik.http.routers.netbird-backend.priority=100'
+      - 'traefik.http.routers.netbird-backend.service=netbird-server'
+      - 'traefik.http.routers.netbird-backend-secure.rule=Host(`${SERVICE_FQDN_NETBIRD}`) && (PathPrefix(`/api`) || PathPrefix(`/oauth2`) || PathPrefix(`/relay`) || PathPrefix(`/ws-proxy/`))'
+      - 'traefik.http.routers.netbird-backend-secure.entrypoints=https'
+      - 'traefik.http.routers.netbird-backend-secure.tls=true'
+      - 'traefik.http.routers.netbird-backend-secure.tls.certresolver=letsencrypt'
+      - 'traefik.http.routers.netbird-backend-secure.priority=100'
+      - 'traefik.http.routers.netbird-backend-secure.service=netbird-server'
+      - 'traefik.http.services.netbird-server.loadbalancer.server.port=80'
+      # gRPC has to be proxied as h2c, otherwise the agents cannot reach the management API
+      - 'traefik.http.routers.netbird-grpc.rule=Host(`${SERVICE_FQDN_NETBIRD}`) && (PathPrefix(`/signalexchange.SignalExchange/`) || PathPrefix(`/management.ManagementService/`) || PathPrefix(`/management.ProxyService/`))'
+      - 'traefik.http.routers.netbird-grpc.entrypoints=http'
+      - 'traefik.http.routers.netbird-grpc.priority=100'
+      - 'traefik.http.routers.netbird-grpc.service=netbird-server-h2c'
+      - 'traefik.http.routers.netbird-grpc-secure.rule=Host(`${SERVICE_FQDN_NETBIRD}`) && (PathPrefix(`/signalexchange.SignalExchange/`) || PathPrefix(`/management.ManagementService/`) || PathPrefix(`/management.ProxyService/`))'
+      - 'traefik.http.routers.netbird-grpc-secure.entrypoints=https'
+      - 'traefik.http.routers.netbird-grpc-secure.tls=true'
+      - 'traefik.http.routers.netbird-grpc-secure.tls.certresolver=letsencrypt'
+      - 'traefik.http.routers.netbird-grpc-secure.priority=100'
+      - 'traefik.http.routers.netbird-grpc-secure.service=netbird-server-h2c'
+      - 'traefik.http.services.netbird-server-h2c.loadbalancer.server.port=80'
+      - 'traefik.http.services.netbird-server-h2c.loadbalancer.server.scheme=h2c'
+
+  dashboard:
+    image: 'netbirdio/dashboard:v2.94.0'
+    environment:
+      - SERVICE_FQDN_NETBIRD
+      - NB_DOMAIN=${SERVICE_FQDN_NETBIRD}
+      - NETBIRD_MGMT_API_ENDPOINT=https://${SERVICE_FQDN_NETBIRD}
+      - NETBIRD_MGMT_GRPC_API_ENDPOINT=https://${SERVICE_FQDN_NETBIRD}
+      - AUTH_AUDIENCE=netbird-dashboard
+      - AUTH_CLIENT_ID=netbird-dashboard
+      - AUTH_AUTHORITY=https://${SERVICE_FQDN_NETBIRD}/oauth2
+      - USE_AUTH0=false
+      - AUTH_SUPPORTED_SCOPES=openid profile email groups
+      - AUTH_REDIRECT_URI=/nb-auth
+      - AUTH_SILENT_REDIRECT_URI=/nb-silent-auth
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  netbird-data:
