@@ -42,17 +42,17 @@ services:
             enabled: false
           authSecret: "$$(cat $${SECRET_FILE})"
           dataDir: "/var/lib/netbird"
-        auth:
-          issuer: "https://$${DOMAIN}/oauth2"
-          signKeyRefreshEnabled: true
-          dashboardRedirectURIs:
-            - "https://$${DOMAIN}/nb-auth"
-            - "https://$${DOMAIN}/nb-silent-auth"
-          cliRedirectURIs:
-            - "http://localhost:53000/"
-        store:
-          engine: "sqlite"
-          encryptionKey: "$$(cat $${KEY_FILE})"
+          auth:
+            issuer: "https://$${DOMAIN}/oauth2"
+            signKeyRefreshEnabled: true
+            dashboardRedirectURIs:
+              - "https://$${DOMAIN}/nb-auth"
+              - "https://$${DOMAIN}/nb-silent-auth"
+            cliRedirectURIs:
+              - "http://localhost:53000/"
+          store:
+            engine: "sqlite"
+            encryptionKey: "$$(cat $${KEY_FILE})"
         CONFIG
         exec /go/bin/netbird-server --config /etc/netbird/config.yaml
     volumes:
