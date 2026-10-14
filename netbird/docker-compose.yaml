@@ -17,6 +17,11 @@ services:
         set -e
         mkdir -p /var/lib/netbird
         DOMAIN="$${COOLIFY_FQDN:-localhost}"
+        # Clients must reach STUN directly: an HTTP proxy/CDN (Cloudflare proxy or a
+        # tunnel) does not carry UDP. Point NB_STUN_HOST at the server's public IP or a
+        # DNS-only hostname; it defaults to the service domain (fine when that domain is
+        # not behind a proxy).
+        STUN_HOST="$${NB_STUN_HOST:-$${DOMAIN}}"
         SECRET_FILE=/var/lib/netbird/auth-secret
         KEY_FILE=/var/lib/netbird/encryption-key
         if [ ! -f "$${SECRET_FILE}" ]; then head -c 32 /dev/urandom | base64 -w0 > "$${SECRET_FILE}"; fi
@@ -25,8 +30,8 @@ services:
         server:
           listenAddress: ":80"
           exposedAddress: "https://$${DOMAIN}:443"
-          stunPorts:
-            - 3478
+          stuns:
+            - uri: "stun:$${STUN_HOST}:3478"
           metricsPort: 9090
           healthcheckAddress: ":9000"
           logLevel: "info"
@@ -48,8 +53,6 @@ services:
           encryptionKey: "$$(cat $${KEY_FILE})"
         CONFIG
         exec /go/bin/netbird-server --config /etc/netbird/config.yaml
-    ports:
-      - '3478:3478/udp'
     volumes:
       - 'netbird-data:/var/lib/netbird'
     healthcheck:
@@ -107,6 +110,23 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  stun:
+    # Standalone STUN responder: the built-in STUN of netbird-server is disabled as soon
+    # as server.stuns is set. Only UDP 3478 is published and the UDP relay is disabled,
+    # so this stays a plain STUN server (not an open TURN relay).
+    image: 'coturn/coturn:4.6.3'
+    restart: unless-stopped
+    command:
+      - '-n'
+      - '--no-auth'
+      - '--no-tls'
+      - '--no-dtls'
+      - '--no-udp-relay'
+      - '--listening-port=3478'
+      - '--log-file=stdout'
+    ports:
+      - '3478:3478/udp'
 
 volumes:
   netbird-data:
