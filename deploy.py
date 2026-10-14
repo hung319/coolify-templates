@@ -36,6 +36,8 @@ def call(method, url, token, payload=None):
     req.add_header("Authorization", "Bearer " + token)
     req.add_header("Content-Type", "application/json")
     req.add_header("Accept", "application/json")
+    # panels behind Cloudflare reject the default python-urllib signature (error 1010)
+    req.add_header("User-Agent", "coolify-templates/1.0")
     try:
         with urllib.request.urlopen(req, timeout=90) as resp:
             body = resp.read().decode()
