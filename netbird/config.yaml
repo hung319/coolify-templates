@@ -1,0 +1,52 @@
+# Sample NetBird server config (all-in-one image).
+#
+# You normally do NOT need this file: docker-compose.yaml in this folder generates the config
+# at container start from the service domain (COOLIFY_FQDN), so the OIDC issuer, relay address
+# and redirect URIs always follow the domain you set in Coolify.
+#
+# Use it only if you prefer a static config:
+#   1. replace mesh.example.com with your domain and fill in the two random values
+#   2. in docker-compose.yaml drop the `entrypoint:` / `command:` block and mount this file:
+#        volumes:
+#          - 'netbird-data:/var/lib/netbird'
+#          - './config.yaml:/etc/netbird/config.yaml'
+#        command:
+#          - '--config'
+#          - /etc/netbird/config.yaml
+
+server:
+  listenAddress: ":80"
+  exposedAddress: "https://mesh.example.com:443"
+  stunPorts:
+    - 3478
+  metricsPort: 9090
+  healthcheckAddress: ":9000"
+  logLevel: "info"
+  logFile: "console"
+  tls:
+    enabled: false
+  # generate with: head -c 32 /dev/urandom | base64 -w0
+  authSecret: "REPLACE_WITH_RANDOM_32_BYTES_BASE64"
+  dataDir: "/var/lib/netbird"
+
+auth:
+  issuer: "https://mesh.example.com/oauth2"
+  signKeyRefreshEnabled: true
+  dashboardRedirectURIs:
+    - "https://mesh.example.com/nb-auth"
+    - "https://mesh.example.com/nb-silent-auth"
+  cliRedirectURIs:
+    - "http://localhost:53000/"
+
+reverseProxy:
+  # the reverse proxy in front of netbird-server. Containers of a Coolify service sit on a
+  # docker network inside 172.16.0.0/12, so trust that range - otherwise the server logs
+  # "TrustedPeers contains the default route 0.0.0.0/0 ... allows connection IP spoofing".
+  trustedHTTPProxies:
+    - "172.16.0.0/12"
+
+store:
+  engine: "sqlite"
+  # optional, generate with: openssl rand -base64 32
+  # keep it stable, otherwise the SQLite data gets re-encrypted on every start
+  # encryptionKey: "REPLACE_WITH_RANDOM_32_BYTES_BASE64"
