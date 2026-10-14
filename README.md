@@ -38,7 +38,10 @@ Create it? [y/N] y
 service created and deployment started: ktctl8ux...
 ```
 
-The created service id is remembered in `.deploy-state.json`, so updating later is just:
+The service is created as `<template>-<service-uuid>` (e.g. `netbird-eqtvmhqio4vxo4g1c74exsls`) so
+its folder on the server — `/data/coolify/services/<service-uuid>` — is obvious from the panel.
+Pass `--name` if you want a name of your own. The id is remembered in `.deploy-state.json`, so
+updating later is just:
 
 ```bash
 python3 deploy.py netbird --update --deploy
