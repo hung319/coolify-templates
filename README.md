@@ -56,6 +56,12 @@ python3 deploy.py ./any/compose.yaml --create --yes --deploy --project <uuid|nam
 `--environment`, `--destination` and `--name` are there too; anything not passed on the command
 line is picked from a list. Options: `python3 deploy.py --help`.
 
+`--list` prints every choice with its uuid, including the environments of each project and the
+destinations of each server, and passing an unknown `--project` / `--environment` / `--server` /
+`--destination` / `--service` prints the same list instead of guessing. When a template references
+Coolify magic variables (`${SERVICE_FQDN_*}`) the tool also disables label escaping for that
+service, otherwise the panel escapes the `$` and Traefik drops the routers.
+
 ## Templates
 
 | Template | What it is |
