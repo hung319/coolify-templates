@@ -8,15 +8,12 @@
 ## Deploy with the CLI
 
 ```bash
-cd ..
-export COOLIFY_URL=https://coolify.example.com
-export COOLIFY_API_KEY=...
-export COOLIFY_PROJECT_UUID=...
-export COOLIFY_SERVER_UUID=...
-export COOLIFY_DESTINATION_UUID=...
-
-python3 deploy.py netbird/docker-compose.yaml --name netbird --create --deploy
+python3 ../deploy.py netbird            # wizard: pick project, server, confirm
+python3 ../deploy.py netbird --create --yes --deploy --project "SG LOC" --server 194.233.70.145
 ```
+
+Only the panel URL and an API key are needed (asked once, then kept in `.env`); the project,
+environment, server and destination are chosen from lists. See the [root README](../README.md).
 
 ## Deploy by hand
 
