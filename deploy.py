@@ -302,6 +302,13 @@ def create(api: Coolify, name: str, compose_path: str, args) -> str:
     print("\nservice created%s: %s" % (" and deployment started" if deploy_now else "", uuid))
     if body.get("domains"):
         print("domains:", ", ".join(body["domains"]))
+    # Coolify names template services <name>-<random>; use <template>-<uuid> instead so the
+    # service folder /data/coolify/services/<uuid> on the server is obvious from the panel.
+    if uuid and not args.name:
+        named = "%s-%s" % (name, uuid)
+        status, renamed = api.call("PATCH", "/services/" + uuid, {"name": named})
+        if status < 300:
+            print("named it: %s   (folder on the server: /data/coolify/services/%s)" % (named, uuid))
     print("next time: python3 deploy.py %s --update --service %s --deploy" % (name, uuid))
     return uuid
 
