@@ -18,7 +18,9 @@ services:
         mkdir -p /var/lib/netbird
         DOMAIN="$${COOLIFY_FQDN:-localhost}"
         SECRET_FILE=/var/lib/netbird/auth-secret
+        KEY_FILE=/var/lib/netbird/encryption-key
         if [ ! -f "$${SECRET_FILE}" ]; then head -c 32 /dev/urandom | base64 -w0 > "$${SECRET_FILE}"; fi
+        if [ ! -f "$${KEY_FILE}" ]; then head -c 32 /dev/urandom | base64 -w0 > "$${KEY_FILE}"; fi
         cat > /etc/netbird/config.yaml <<CONFIG
         server:
           listenAddress: ":80"
@@ -43,6 +45,7 @@ services:
             - "http://localhost:53000/"
         store:
           engine: "sqlite"
+          encryptionKey: "$$(cat $${KEY_FILE})"
         CONFIG
         exec /go/bin/netbird-server --config /etc/netbird/config.yaml
     ports:
