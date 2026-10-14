@@ -1,0 +1,44 @@
+---
+title: "NetBird"
+description: "Self-hosted WireGuard-based overlay network with SSO/MFA, embedded IdP, signal, relay and dashboard."
+---
+
+# NetBird
+
+[NetBird](https://netbird.io) combines a WireGuard-based overlay network with SSO/MFA and
+granular access control. The `netbird-server` image used here is the all-in-one build: management,
+signal, relay, an embedded Dex identity provider and the API, plus the dashboard image for the UI.
+
+<Image
+  src="/images/services/netbird.svg"
+  alt="NetBird logo"
+  width={120}
+  height={120}
+/>
+
+## What gets deployed
+
+- `netbird-server` — management API, signal, relay, embedded IdP (`/oauth2`), gRPC endpoints and STUN/TURN (3478/udp)
+- `dashboard` — the NetBird web UI
+
+Both are served from one domain: `/api`, `/oauth2`, `/relay` and `/ws-proxy` go to the server,
+everything else to the dashboard, and the gRPC paths are proxied as `h2c`.
+
+## Setup
+
+1. Create the service from the template and set a domain for it.
+2. Open the domain and create the first admin account (that step is only needed once).
+3. In the dashboard, go to **Setup Keys** and create a key, then run
+   `netbird up --setup-key <key> --management-url https://<your-domain>` on each peer.
+
+The server config (OIDC issuer, redirect URIs, relay address) is generated at start from the
+service domain, so nothing has to be edited by hand. `3478/udp` must be reachable for STUN/TURN
+if you want peers to connect directly instead of through the relay.
+
+## Notes
+
+- The `netbird-server` image contains neither `curl` nor `wget`; the template healthchecks
+  probe the HTTP port through bash `/dev/tcp`.
+- `/health` on that image always answers `503` with `{"status":"unhealthy","listeners":null}`
+  because it is the relay healthcheck and the relay is multiplexed on the management port in
+  this image, so do not use it as a container healthcheck.
