@@ -161,6 +161,16 @@ def templates() -> list[tuple[str, str]]:
     return found
 
 
+def needs_unescaped_labels(compose_path: str) -> bool:
+    """True when the compose references Coolify magic variables in a way that must survive.
+
+    The panel escapes '$' in container labels by default, which turns ${SERVICE_FQDN_X} into a
+    literal string in the container and makes Traefik drop the router ("not a valid hostname").
+    """
+    text = open(compose_path, encoding="utf-8", errors="replace").read()
+    return "${SERVICE_FQDN_" in text or "${SERVICE_URL_" in text
+
+
 def resolve_template(argument: str | None):
     found = templates()
     if argument:
@@ -202,11 +212,14 @@ def remember(template: str, uuid: str) -> None:
 
 def choose_targets(api: Coolify, args):
     projects = api.get("/projects")
-    names = [p["name"] for p in projects]
-    project = args.project
-    if project:
-        match = [p for p in projects if project in (p["uuid"],)] or [p for p in projects if project.lower() == p["name"].lower()]
-        project = match[0] if match else None
+    project = None
+    if args.project:
+        project = next((p for p in projects if args.project in (p["uuid"], p["name"])), None)
+        if project is None:
+            print("project %r not found. Available:" % args.project)
+            for item in projects:
+                print("  - %-22s %s" % (item["name"], item["uuid"]))
+            sys.exit(1)
     if not project:
         project = pick("Projects:", projects, lambda p: "%s  (%s)" % (p["name"], p.get("description") or p["uuid"]))
 
@@ -216,9 +229,12 @@ def choose_targets(api: Coolify, args):
         sys.exit("project %s has no environment" % project["name"])
     environment = None
     if args.environment:
-        environment = next((e for e in environments if e["name"] == args.environment), None)
+        environment = next((e for e in environments if args.environment in (e["name"], e.get("uuid"))), None)
         if environment is None:
-            sys.exit("environment %s not found in project %s" % (args.environment, project["name"]))
+            print("environment %r not found in project %s. Available:" % (args.environment, project["name"]))
+            for item in environments:
+                print("  - %-16s %s" % (item["name"], item.get("uuid", "")))
+            sys.exit(1)
     if environment is None:
         default = next((e for e in environments if e["name"] == "production"), environments[0])
         environment = default if (len(environments) == 1 or args.yes) else pick("Environments:", environments, lambda e: e["name"], default=default)
@@ -229,7 +245,10 @@ def choose_targets(api: Coolify, args):
     if args.server:
         server = next((s for s in servers if args.server in (s["uuid"], s["ip"], s["name"])), None)
         if server is None:
-            sys.exit("server %s not found" % args.server)
+            print("server %r not found. Available:" % args.server)
+            for item in servers:
+                print("  - %-28s %-16s %s" % (item["name"], item.get("ip", ""), item["uuid"]))
+            sys.exit(1)
     if server is None:
         server = pick("Servers:", servers,
                       lambda s: "%-28s %-16s %s" % (s["name"], s.get("ip", ""), "reachable" if s.get("is_reachable") else "UNREACHABLE"))
@@ -238,6 +257,11 @@ def choose_targets(api: Coolify, args):
     destination = None
     if args.destination:
         destination = next((d for d in destinations if args.destination in (d.get("uuid"), d.get("name"))), None)
+        if destination is None:
+            print("destination %r not found on server %s. Available:" % (args.destination, server["name"]))
+            for item in destinations:
+                print("  - %-16s %s" % (item.get("name"), item.get("uuid", "")))
+            sys.exit(1)
     elif len(destinations) > 1:
         destination = pick("Destinations:", destinations, lambda d: "%s (%s)" % (d.get("name"), d.get("uuid")))
     elif len(destinations) == 1:
@@ -268,6 +292,9 @@ def create(api: Coolify, name: str, compose_path: str, args) -> str:
     }
     if destination:
         payload["destination_uuid"] = destination["uuid"]
+    if needs_unescaped_labels(compose_path):
+        payload["is_container_label_escape_enabled"] = False
+        print("  (labels use Coolify magic variables -> label escaping disabled for this service)")
     status, body = api.call("POST", "/services", payload)
     if status >= 300:
         sys.exit("create failed: %s %s" % (status, json.dumps(body)[:400]))
@@ -285,21 +312,40 @@ def update(api: Coolify, name: str, compose_path: str, args) -> str:
     service = None
     if target:
         service = next((s for s in services if target in (s["uuid"], s["name"])), None)
+        if service is None:
+            if args.service:
+                print("service %r not found. Available:" % args.service)
+                for item in services:
+                    print("  - %-40s %s" % (item["name"], item["uuid"]))
+                sys.exit(1)
+            print("(remembered service %s is gone, pick another one)" % target)
     if service is None:
         if not services:
             sys.exit("no services on this panel")
         default = next((s for s in services if s["name"].startswith(name)), None)
-        service = pick("Services:", services, lambda s: "%-40s %s" % (s["name"], s["uuid"]), default=default)
+        if args.yes or default is None:
+            if default is None:
+                print("no service matching %r. Available:" % name)
+                for item in services:
+                    print("  - %-40s %s" % (item["name"], item["uuid"]))
+                sys.exit(1)
+            service = default
+        else:
+            service = pick("Services:", services, lambda s: "%-40s %s" % (s["name"], s["uuid"]), default=default)
     rel = os.path.relpath(compose_path, HERE)
     print("\nAbout to UPDATE a service:")
     print("  service : %s (%s)" % (service["name"], service["uuid"]))
     print("  template: %s" % (rel if not rel.startswith("..") else compose_path))
     if not confirm("Push the compose and redeploy?", args.yes):
         sys.exit("aborted")
-    status, body = api.call("PATCH", "/services/" + service["uuid"], {
+    payload = {
         "docker_compose_raw": base64.b64encode(open(compose_path, "rb").read()).decode(),
         "instant_deploy": True,
-    })
+    }
+    if needs_unescaped_labels(compose_path):
+        payload["is_container_label_escape_enabled"] = False
+        print("  (labels use Coolify magic variables -> label escaping disabled for this service)")
+    status, body = api.call("PATCH", "/services/" + service["uuid"], payload)
     if status >= 300:
         sys.exit("update failed: %s %s" % (status, json.dumps(body)[:400]))
     print("\nupdated:", json.dumps(body)[:200])
@@ -310,19 +356,28 @@ def listing(api: Coolify):
     print("Templates in this repo:")
     for name, path in templates():
         print("  - %-18s %s" % (name, os.path.relpath(path, HERE)))
-    print("\nProjects:")
+    print("\nProjects and environments:")
     for project in api.get("/projects"):
+        print("  - %-22s %s" % (project["name"], project["uuid"]))
         detail = api.get("/projects/" + project["uuid"])
-        envs = ", ".join(e["name"] for e in detail.get("environments") or [])
-        print("  - %-22s %s [%s]" % (project["name"], project["uuid"], envs))
-    print("\nServers:")
+        for item in detail.get("environments") or []:
+            print("      environment  %-16s %s" % (item["name"], item.get("uuid", "")))
+    print("\nServers and destinations:")
     for server in api.get("/servers"):
+        if not server.get("is_usable", True):
+            continue
         print("  - %-28s %-16s %s" % (server["name"], server.get("ip", ""),
                                       "reachable" if server.get("is_reachable") else "UNREACHABLE"))
+        status, body = api.call("GET", "/servers/%s/destinations" % server["uuid"])
+        for item in (body if isinstance(body, list) else []):
+            print("      destination  %-16s %s" % (item.get("name"), item.get("uuid", "")))
     print("\nServices:")
     for service in api.get("/services"):
         print("  - %-40s %s" % (service["name"], service["uuid"]))
-    print("\nRemembered:" if state() else "", json.dumps(state()) if state() else "")
+    if state():
+        print("\nRemembered (template -> service uuid):")
+        for name, uuid in state().items():
+            print("  - %-18s %s" % (name, uuid))
 
 
 def main():
