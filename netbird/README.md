@@ -24,6 +24,19 @@ Coolify fills `SERVICE_FQDN_NETBIRD` and the dashboard/server pick it up automat
 Afterwards: open the domain, create the first admin account, then **Setup Keys → Create** and on
 each machine run `netbird up --setup-key <key> --management-url https://mesh.example.com`.
 
+## Before updating an existing instance
+
+`deploy.py netbird --update` replaces whatever the service ran with this compose, and this compose
+generates `authSecret` / `store.encryptionKey` on first start and keeps them in the
+`netbird-data` volume. An instance that was created with a mounted `config.yaml` has its own
+values there, so copy those two into the volume first, otherwise the SQLite data was encrypted
+with a key the new config does not know:
+
+```bash
+docker run --rm -v <service>_netbird-data:/data alpine sh -c \
+  'printf %s "<authSecret-from-config.yaml>" > /data/auth-secret; printf %s "<encryptionKey>" > /data/encryption-key'
+```
+
 ## Things that bite
 
 * **`is_container_label_escape_enabled` must be off** for this service. By default Coolify escapes
