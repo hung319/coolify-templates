@@ -37,6 +37,30 @@ docker run --rm -v <service>_netbird-data:/data alpine sh -c \
   'printf %s "<authSecret-from-config.yaml>" > /data/auth-secret; printf %s "<encryptionKey>" > /data/encryption-key'
 ```
 
+## STUN (3478/udp) and the Cloudflare proxy
+
+Peers need STUN to discover their public endpoints and connect directly (instead of going
+through the relay). NetBird advertises STUN as the management host plus `stunPorts`, and if
+that hostname goes through the Cloudflare proxy (or a Cloudflare Tunnel) the UDP packets never
+arrive: the proxy only speaks HTTP(S)/WebSocket.
+
+So the compose runs a small standalone STUN server (coturn, UDP 3478 only) and the generated
+server config advertises it at `NB_STUN_HOST` instead of the proxied domain:
+
+```bash
+# in Coolify: service -> Environment Variables
+NB_STUN_HOST=203.0.113.10          # the server's public IP ...
+NB_STUN_HOST=stun.example.com      # ... or a DNS-only (grey cloud) hostname
+```
+
+Without it, `NB_STUN_HOST` falls back to the service domain, which is correct when the domain
+is *not* proxied (plain DNS A record to the server). Note that setting `stuns` disables the
+built-in STUN server of `netbird-server`, which is exactly why coturn is there. Peers pick the
+new STUN up when they reconnect.
+
+If you edit `config.yaml` in Coolify (Files/Configuration) instead of using the generated one,
+keep the same `stuns:` entry, otherwise a redeploy writes the old file back.
+
 ## Things that bite
 
 * **`is_container_label_escape_enabled` must be off** for this service. By default Coolify escapes
