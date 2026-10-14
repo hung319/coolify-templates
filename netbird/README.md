@@ -1,0 +1,49 @@
+# NetBird (self-hosted) — Coolify service template
+
+| File | What it is |
+|---|---|
+| `docker-compose.yaml` | ready-to-deploy Coolify **service**: all-in-one `netbird-server` (management, signal, relay, embedded Dex IdP) + `dashboard`, served from one domain |
+| `config.yaml` | sample static server config — only needed if you prefer mounting a config file instead of letting the compose generate it |
+
+## Deploy with the CLI
+
+```bash
+cd ..
+export COOLIFY_URL=https://coolify.example.com
+export COOLIFY_API_KEY=...
+export COOLIFY_PROJECT_UUID=...
+export COOLIFY_SERVER_UUID=...
+export COOLIFY_DESTINATION_UUID=...
+
+python3 deploy.py netbird/docker-compose.yaml --name netbird --create --deploy
+```
+
+## Deploy by hand
+
+Coolify → **+ New** → **Service** → **Docker Compose Empty**, then paste the content of
+`docker-compose.yaml`. Give the service a domain (any domain, e.g. `mesh.example.com`) —
+Coolify fills `SERVICE_FQDN_NETBIRD` and the dashboard/server pick it up automatically.
+
+Afterwards: open the domain, create the first admin account, then **Setup Keys → Create** and on
+each machine run `netbird up --setup-key <key> --management-url https://mesh.example.com`.
+
+## Things that bite
+
+* **`is_container_label_escape_enabled` must be off** for this service. By default Coolify escapes
+  `$` in container labels, so ``Host(`${SERVICE_FQDN_NETBIRD}`)`` lands in the container as a
+  literal and Traefik silently drops the routers (`... is not a valid hostname`). Symptom: the
+  dashboard loads but says you are not authenticated, because `/api` and `/oauth2` request the
+  dashboard container and get a 404.
+* The `netbird-server` container must carry `traefik.enable=true`, because Coolify runs Traefik
+  with `--providers.docker.exposedbydefault=false`.
+* Routers are declared on the plain `http` entrypoint with `tls=false` (needed when the domain
+  arrives through a Cloudflare Tunnel) plus a second set on `https` for direct access.
+* The gRPC paths (`/management.ManagementService/`, `/signalexchange.SignalExchange/`,
+  `/management.ProxyService/`) are proxied with `scheme=h2c`, otherwise the agents cannot reach
+  the management API. The dashboard would still look fine, peers just would not connect.
+* `3478/udp` must be open inbound (and allowed outbound by any host firewall) for STUN/TURN, i.e.
+  for peers to connect directly instead of through the relay.
+* `netbird-server`'s own `/health` endpoint always answers `503`
+  (`{"status":"unhealthy","listeners":null}`): it is the relay healthcheck, and the relay is
+  multiplexed on the management port in this image. The healthcheck in the compose probes the HTTP
+  port with bash `/dev/tcp` instead, since the image has neither `curl` nor `wget`.
