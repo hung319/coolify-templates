@@ -16,7 +16,9 @@ services:
       - |
         set -e
         mkdir -p /var/lib/netbird /etc/netbird
-        DOMAIN="$${COOLIFY_FQDN:-localhost}"
+        # SERVICE_FQDN_DASHBOARD is injected into every container of the service;
+        # COOLIFY_FQDN only reaches the container that holds the domain.
+        DOMAIN="$${SERVICE_FQDN_DASHBOARD:-$${COOLIFY_FQDN:-localhost}}"
         # Clients must reach STUN directly: an HTTP proxy/CDN (Cloudflare proxy or a
         # tunnel) does not carry UDP. Point NB_STUN_HOST at the server's public IP or a
         # DNS-only hostname; it defaults to the service domain (fine when that domain is
