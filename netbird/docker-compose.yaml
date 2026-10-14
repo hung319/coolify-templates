@@ -65,11 +65,11 @@ services:
     labels:
       - traefik.enable=true
       # management API, embedded IdP, relay and reverse proxy websocket
-      - 'traefik.http.routers.netbird-backend.rule=Host(`${SERVICE_FQDN_NETBIRD}`) && (PathPrefix(`/api`) || PathPrefix(`/oauth2`) || PathPrefix(`/relay`) || PathPrefix(`/ws-proxy/`))'
+      - 'traefik.http.routers.netbird-backend.rule=Host(`${SERVICE_FQDN_DASHBOARD}`) && (PathPrefix(`/api`) || PathPrefix(`/oauth2`) || PathPrefix(`/relay`) || PathPrefix(`/ws-proxy/`))'
       - 'traefik.http.routers.netbird-backend.entrypoints=http'
       - 'traefik.http.routers.netbird-backend.priority=100'
       - 'traefik.http.routers.netbird-backend.service=netbird-server'
-      - 'traefik.http.routers.netbird-backend-secure.rule=Host(`${SERVICE_FQDN_NETBIRD}`) && (PathPrefix(`/api`) || PathPrefix(`/oauth2`) || PathPrefix(`/relay`) || PathPrefix(`/ws-proxy/`))'
+      - 'traefik.http.routers.netbird-backend-secure.rule=Host(`${SERVICE_FQDN_DASHBOARD}`) && (PathPrefix(`/api`) || PathPrefix(`/oauth2`) || PathPrefix(`/relay`) || PathPrefix(`/ws-proxy/`))'
       - 'traefik.http.routers.netbird-backend-secure.entrypoints=https'
       - 'traefik.http.routers.netbird-backend-secure.tls=true'
       - 'traefik.http.routers.netbird-backend-secure.tls.certresolver=letsencrypt'
@@ -77,11 +77,11 @@ services:
       - 'traefik.http.routers.netbird-backend-secure.service=netbird-server'
       - 'traefik.http.services.netbird-server.loadbalancer.server.port=80'
       # gRPC has to be proxied as h2c, otherwise the agents cannot reach the management API
-      - 'traefik.http.routers.netbird-grpc.rule=Host(`${SERVICE_FQDN_NETBIRD}`) && (PathPrefix(`/signalexchange.SignalExchange/`) || PathPrefix(`/management.ManagementService/`) || PathPrefix(`/management.ProxyService/`))'
+      - 'traefik.http.routers.netbird-grpc.rule=Host(`${SERVICE_FQDN_DASHBOARD}`) && (PathPrefix(`/signalexchange.SignalExchange/`) || PathPrefix(`/management.ManagementService/`) || PathPrefix(`/management.ProxyService/`))'
       - 'traefik.http.routers.netbird-grpc.entrypoints=http'
       - 'traefik.http.routers.netbird-grpc.priority=100'
       - 'traefik.http.routers.netbird-grpc.service=netbird-server-h2c'
-      - 'traefik.http.routers.netbird-grpc-secure.rule=Host(`${SERVICE_FQDN_NETBIRD}`) && (PathPrefix(`/signalexchange.SignalExchange/`) || PathPrefix(`/management.ManagementService/`) || PathPrefix(`/management.ProxyService/`))'
+      - 'traefik.http.routers.netbird-grpc-secure.rule=Host(`${SERVICE_FQDN_DASHBOARD}`) && (PathPrefix(`/signalexchange.SignalExchange/`) || PathPrefix(`/management.ManagementService/`) || PathPrefix(`/management.ProxyService/`))'
       - 'traefik.http.routers.netbird-grpc-secure.entrypoints=https'
       - 'traefik.http.routers.netbird-grpc-secure.tls=true'
       - 'traefik.http.routers.netbird-grpc-secure.tls.certresolver=letsencrypt'
@@ -93,13 +93,13 @@ services:
   dashboard:
     image: 'netbirdio/dashboard:v2.94.0'
     environment:
-      - SERVICE_FQDN_NETBIRD
-      - NB_DOMAIN=${SERVICE_FQDN_NETBIRD}
-      - NETBIRD_MGMT_API_ENDPOINT=https://${SERVICE_FQDN_NETBIRD}
-      - NETBIRD_MGMT_GRPC_API_ENDPOINT=https://${SERVICE_FQDN_NETBIRD}
+      - SERVICE_FQDN_DASHBOARD
+      - NB_DOMAIN=${SERVICE_FQDN_DASHBOARD}
+      - NETBIRD_MGMT_API_ENDPOINT=https://${SERVICE_FQDN_DASHBOARD}
+      - NETBIRD_MGMT_GRPC_API_ENDPOINT=https://${SERVICE_FQDN_DASHBOARD}
       - AUTH_AUDIENCE=netbird-dashboard
       - AUTH_CLIENT_ID=netbird-dashboard
-      - AUTH_AUTHORITY=https://${SERVICE_FQDN_NETBIRD}/oauth2
+      - AUTH_AUTHORITY=https://${SERVICE_FQDN_DASHBOARD}/oauth2
       - USE_AUTH0=false
       - AUTH_SUPPORTED_SCOPES=openid profile email groups
       - AUTH_REDIRECT_URI=/nb-auth
@@ -127,6 +127,14 @@ services:
       - '--log-file=stdout'
     ports:
       - '3478:3478/udp'
+    healthcheck:
+      # real STUN probe (the coturn image ships the official turnutils_stunclient,
+      # but no curl/wget/nc); on a dead listener it hangs and docker's timeout fails it
+      test: ['CMD', 'turnutils_stunclient', '-p', '3478', '127.0.0.1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 volumes:
   netbird-data:
