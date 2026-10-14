@@ -1,11 +1,11 @@
 # Sample NetBird server config (all-in-one image).
 #
 # You normally do NOT need this file: docker-compose.yaml in this folder generates the config
-# at container start from the service domain (COOLIFY_FQDN), so the OIDC issuer, relay address
-# and redirect URIs always follow the domain you set in Coolify.
+# at container start from the service domain, so the OIDC issuer, relay address and redirect
+# URIs always follow the domain you set in Coolify.
 #
 # Use it only if you prefer a static config:
-#   1. replace mesh.example.com with your domain and fill in the two random values
+#   1. replace mesh.example.com with your domain and fill in the random values
 #   2. in docker-compose.yaml drop the `entrypoint:` / `command:` block and mount this file:
 #        volumes:
 #          - 'netbird-data:/var/lib/netbird'
@@ -13,44 +13,51 @@
 #        command:
 #          - '--config'
 #          - /etc/netbird/config.yaml
+#
+# NOTE: everything below lives under `server:` — the combined server only has `server` at the
+# top level (relay/signal/management are derived from it), so a top-level `auth:` / `store:`
+# block is silently ignored.
 
 server:
   listenAddress: ":80"
   exposedAddress: "https://mesh.example.com:443"
+
   # STUN must be reachable directly by the peers. An HTTP proxy/CDN (Cloudflare proxy,
-  # Cloudflare Tunnel) does not carry UDP, so do not advertise the proxied domain here if
-  # the deployment sits behind one. Setting `stuns` disables the built-in STUN server,
-  # which is why the compose file runs a standalone coturn container on 3478/udp.
+  # Cloudflare Tunnel) does not carry UDP, so do not advertise the proxied domain here if the
+  # deployment sits behind one. Setting `stuns` disables the built-in STUN server, which is why
+  # the compose file runs a standalone coturn container on 3478/udp.
   stuns:
     - uri: "stun:203.0.113.10:3478"   # server public IP, or a DNS-only hostname
+
   metricsPort: 9090
   healthcheckAddress: ":9000"
   logLevel: "info"
   logFile: "console"
   tls:
     enabled: false
+
   # generate with: head -c 32 /dev/urandom | base64 -w0
   authSecret: "REPLACE_WITH_RANDOM_32_BYTES_BASE64"
   dataDir: "/var/lib/netbird"
 
-auth:
-  issuer: "https://mesh.example.com/oauth2"
-  signKeyRefreshEnabled: true
-  dashboardRedirectURIs:
-    - "https://mesh.example.com/nb-auth"
-    - "https://mesh.example.com/nb-silent-auth"
-  cliRedirectURIs:
-    - "http://localhost:53000/"
+  auth:
+    issuer: "https://mesh.example.com/oauth2"
+    signKeyRefreshEnabled: true
+    dashboardRedirectURIs:
+      - "https://mesh.example.com/nb-auth"
+      - "https://mesh.example.com/nb-silent-auth"
+    cliRedirectURIs:
+      - "http://localhost:53000/"
 
-reverseProxy:
-  # the reverse proxy in front of netbird-server. Containers of a Coolify service sit on a
-  # docker network inside 172.16.0.0/12, so trust that range - otherwise the server logs
-  # "TrustedPeers contains the default route 0.0.0.0/0 ... allows connection IP spoofing".
-  trustedHTTPProxies:
-    - "172.16.0.0/12"
+  reverseProxy:
+    # the reverse proxy in front of netbird-server. Containers of a Coolify service sit on a
+    # docker network inside 172.16.0.0/12, so trust that range - otherwise the server logs
+    # "TrustedPeers contains the default route 0.0.0.0/0 ... allows connection IP spoofing".
+    trustedHTTPProxies:
+      - "172.16.0.0/12"
 
-store:
-  engine: "sqlite"
-  # optional, generate with: openssl rand -base64 32
-  # keep it stable, otherwise the SQLite data gets re-encrypted on every start
-  # encryptionKey: "REPLACE_WITH_RANDOM_32_BYTES_BASE64"
+  store:
+    engine: "sqlite"
+    # optional, generate with: openssl rand -base64 32
+    # keep it stable, otherwise the SQLite data gets re-encrypted on every start
+    # encryptionKey: "REPLACE_WITH_RANDOM_32_BYTES_BASE64"
