@@ -61,6 +61,72 @@ new STUN up when they reconnect.
 If you edit `config.yaml` in Coolify (Files/Configuration) instead of using the generated one,
 keep the same `stuns:` entry, otherwise a redeploy writes the old file back.
 
+
+## Optional: NetBird Reverse Proxy (expose services to the internet)
+
+NetBird's [Reverse Proxy](https://docs.netbird.io/manage/reverse-proxy) publishes internal
+services (a peer, a network resource) through the mesh. Self-hosted it **requires Traefik**:
+Traefik has to pass the TLS connection *through* untouched, because the `netbird-proxy` container
+manages its own certificates.
+
+1. Get a token:
+   ```bash
+   docker exec netbird-server-<uuid> /go/bin/netbird-server --config /etc/netbird/config.yaml \
+     admin token create --name my-proxy          # prints nbx_... once
+   ```
+2. Service environment (Coolify → service → Environment Variables):
+   ```
+   NB_PROXY_DOMAIN=proxy.example.com            # cluster apex; subdomains are minted from it
+   NB_PROXY_TOKEN=nbx_...
+   NB_PROXY_MANAGEMENT_ADDRESS=http://netbird-server:80   # over the docker network
+   NB_PROXY_ALLOW_INSECURE=true
+   NB_PROXY_ADDRESS=:8443
+   NB_PROXY_ACME_CERTIFICATES=true
+   NB_PROXY_ACME_CHALLENGE_TYPE=tls-alpn-01
+   NB_PROXY_CERTIFICATE_DIRECTORY=/certs
+   NB_PROXY_FORWARDED_PROTO=https
+   NB_PROXY_PROXY_PROTOCOL=true
+   NB_PROXY_TRUSTED_PROXIES=<service network CIDR>
+   ```
+3. Add the service (labels adapted for Coolify: the entrypoint is `https`, not `websecure`):
+   ```yaml
+     proxy:
+       image: 'netbirdio/reverse-proxy:latest'
+       extra_hosts: ['<netbird domain>:<service network gateway>']   # split DNS, see below
+       volumes: ['netbird-proxy-certs:/certs']
+       healthcheck:   # the image has no shell, so CMD + wget (not CMD-SHELL)
+         test: ['CMD', 'wget', '-qO-', '--timeout=5', 'http://127.0.0.1:8080/healthz']
+       labels:
+         - traefik.enable=true
+         - traefik.tcp.routers.proxy-passthrough.entrypoints=https
+         - 'traefik.tcp.routers.proxy-passthrough.rule=HostSNI(`*`) && !HostSNI(`<netbird domain>`)'
+         - traefik.tcp.routers.proxy-passthrough.tls.passthrough=true
+         - traefik.tcp.routers.proxy-passthrough.priority=1
+         - traefik.tcp.routers.proxy-passthrough.service=proxy-tls
+         - traefik.tcp.services.proxy-tls.loadbalancer.server.port=8443
+         - traefik.tcp.services.proxy-tls.loadbalancer.serverstransport=pp-v2@file
+   ```
+4. `serversTransports` is not a label — put it in Traefik's file provider
+   (`/data/coolify/proxy/dynamic/netbird-proxy-pp.yaml`):
+   ```yaml
+   tcp:
+     serversTransports:
+       pp-v2:
+         proxyProtocol:
+           version: 2
+   ```
+
+Gotchas:
+- Wildcard DNS `*.proxy.example.com` → the server, **DNS-only** (grey cloud). A Cloudflare-proxied
+  record terminates TLS and breaks both the passthrough and the `tls-alpn-01` challenge.
+- `!HostSNI(<netbird domain>)` keeps the dashboard/API terminating TLS at Traefik.
+- **No hairpin NAT?** If the server cannot reach its own public IP, the proxy's NetBird client
+  cannot reach Signal/relay and every proxied service returns 504. Point the NetBird domain at the
+  service network's gateway with `extra_hosts` (split DNS) so it goes through the local Traefik.
+- The token created with `admin token create` makes a management-wide (shared) cluster; services
+  are reachable publicly. NetBird-only access and the "Proxy Cluster" target need a proxy running
+  as an embedded peer (`netbird proxy`).
+
 ## Things that bite
 
 * **`is_container_label_escape_enabled` must be off** for this service. By default Coolify escapes
