@@ -117,19 +117,21 @@ services:
     # Standalone STUN responder: the built-in STUN of netbird-server is disabled as soon
     # as server.stuns is set. Only UDP 3478 is published and the UDP relay is disabled,
     # so this stays a plain STUN server (not an open TURN relay).
-    image: 'coturn/coturn:4.6.3'
+    image: 'coturn/coturn:4.18.0'
     restart: unless-stopped
     command:
       - '-n'
       - '--no-auth'
       - '--no-tls'
-      - '--no-dtls'
       - '--no-udp-relay'
       - '--listening-port=3478'
       - '--log-file=stdout'
     ports:
       - '3478:3478/udp'
     healthcheck:
+      # coturn >= 4.18 made DTLS opt-in (--dtls) and dropped --no-dtls; TLS/DTLS are off
+      # with --no-tls alone. Keep the image pinned: `latest` jumped 4.6.3 -> 4.18.0 and
+      # broke the old flag set (turnserver printed help and exited 255).
       # real STUN probe (the coturn image ships the official turnutils_stunclient,
       # but no curl/wget/nc); on a dead listener it hangs and docker's timeout fails it
       test: ['CMD', 'turnutils_stunclient', '-p', '3478', '127.0.0.1']
